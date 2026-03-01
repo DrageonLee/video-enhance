@@ -1,15 +1,18 @@
 """
 frame_interpolation.py
 ----------------------
-RIFE v4.25-based video frame interpolation for teleconferencing.
+BiM-VFI-based video frame interpolation for teleconferencing.
 
 Reference:
-  - Practical-RIFE: https://github.com/hzwer/Practical-RIFE
-  - Paper: arXiv:2011.06294 (Huang et al., ECCV 2022)
+  - BiM-VFI: https://github.com/KAIST-VICLab/BiM-VFI
+  - Paper: "BiM-VFI: Bidirectional Motion Field-Guided Frame Interpolation
+            for Video with Non-uniform Motions" (CVPR 2025)
+  - Authors: Wonyong Seo, Jihyong Oh, Munchurl Kim (KAIST VICLab)
 
 Usage:
-  interpolator = FrameInterpolator(model_path="train_log")
-  frames_out = interpolator.process_video("input.mp4", scale=2)
+  interpolator = FrameInterpolator(cfg_path="BiM-VFI/cfgs/bim_vfi_demo.yaml",
+                                   ckpt_path="checkpoints/bimvfi.pth")
+  interpolator.process_video("input.mp4", "output.mp4", scale=2)
 """
 
 import os
@@ -17,6 +20,7 @@ import sys
 import cv2
 import numpy as np
 import torch
+import yaml
 from pathlib import Path
 from typing import Optional
 from tqdm import tqdm
@@ -24,41 +28,43 @@ from tqdm import tqdm
 
 class FrameInterpolator:
     """
-    RIFE-based video frame interpolator.
+    BiM-VFI-based video frame interpolator (CVPR 2025, KAIST VICLab).
 
-    Loads Practical-RIFE pretrained weights and applies 2x or 4x
-    frame interpolation on input video, targeting teleconference quality.
+    Uses Bidirectional Motion Field (BiM) to handle non-uniform motions,
+    which is particularly effective for teleconferencing video where
+    speakers make varied, non-uniform head/hand motions.
     """
 
     def __init__(
         self,
-        model_path: str = "Practical-RIFE/train_log",
+        bimvfi_root: str = "BiM-VFI",
+        ckpt_path: str = "checkpoints/bimvfi.pth",
         device: Optional[str] = None,
-        fp16: bool = True,
     ):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.fp16 = fp16 and self.device == "cuda"
-        print(f"[FrameInterpolator] Using device: {self.device} | FP16: {self.fp16}")
-        self._load_model(model_path)
+        self.bimvfi_root = bimvfi_root
+        print(f"[FrameInterpolator] Using device: {self.device}")
+        self._load_model(bimvfi_root, ckpt_path)
 
-    def _load_model(self, model_path: str):
-        """Load Practical-RIFE model from train_log directory."""
-        rife_root = str(Path(model_path).parent)
-        if rife_root not in sys.path:
-            sys.path.insert(0, rife_root)
+    def _load_model(self, root: str, ckpt_path: str):
+        """Load BiM-VFI model from checkpoint."""
+        if root not in sys.path:
+            sys.path.insert(0, root)
 
         try:
-            from model.RIFE_HDv3 import Model
-            self.model = Model()
-            self.model.load_model(model_path, -1)
+            from modules.bimvfi import BiMVFI
+            self.model = BiMVFI().to(self.device)
+            ckpt = torch.load(ckpt_path, map_location=self.device)
+            # Support both raw state dict and wrapped checkpoint formats
+            state = ckpt.get("state_dict", ckpt.get("model", ckpt))
+            self.model.load_state_dict(state, strict=False)
             self.model.eval()
-            self.model.device()
-            print(f"[FrameInterpolator] RIFE loaded: {model_path}")
+            print(f"[FrameInterpolator] BiM-VFI loaded: {ckpt_path}")
         except ImportError:
             raise ImportError(
-                "Practical-RIFE not found. Clone it first:\n"
-                "  git clone https://github.com/hzwer/Practical-RIFE\n"
-                "Then set model_path='Practical-RIFE/train_log'"
+                "BiM-VFI not found. Clone it first:\n"
+                "  git clone https://github.com/KAIST-VICLab/BiM-VFI\n"
+                "Then set bimvfi_root='BiM-VFI'"
             )
 
     @torch.inference_mode()
@@ -67,16 +73,16 @@ class FrameInterpolator:
         input_path: str,
         output_path: str,
         scale: int = 2,
-        spatial_scale: float = 1.0,
+        pyr_lvl: int = 3,
     ) -> str:
         """
         Interpolate video frames to increase FPS by `scale` times.
 
         Args:
-            input_path:     Path to input video.
-            output_path:    Path to save interpolated video.
-            scale:          Temporal upscale factor (2 = 30fps→60fps, 4 = 30fps→120fps).
-            spatial_scale:  Spatial downscale ratio for flow estimation (1.0 = full res).
+            input_path:  Path to input video.
+            output_path: Path to save interpolated video.
+            scale:       Temporal upscale factor (2 = 30fps→60fps, 4 = 30fps→120fps).
+            pyr_lvl:     Pyramid levels for flow estimation (3 for standard res).
 
         Returns:
             Path to output video.
@@ -85,7 +91,7 @@ class FrameInterpolator:
 
         frames, fps = self._read_video(input_path)
         out_fps = fps * scale
-        output_frames = self._interpolate_frames(frames, scale, spatial_scale)
+        output_frames = self._interpolate_frames(frames, scale, pyr_lvl)
 
         self._write_video(output_frames, output_path, out_fps)
         print(f"[FrameInterpolator] {fps:.1f}fps → {out_fps:.1f}fps | Saved: {output_path}")
@@ -95,23 +101,23 @@ class FrameInterpolator:
         self,
         frames: list,
         scale: int,
-        spatial_scale: float,
+        pyr_lvl: int,
     ) -> list:
-        """Recursively generate intermediate frames for each adjacent pair."""
+        """Generate intermediate frames for each adjacent pair using BiM-VFI."""
         output = []
-        for i in tqdm(range(len(frames) - 1), desc="Interpolating"):
+        for i in tqdm(range(len(frames) - 1), desc="BiM-VFI Interpolating"):
             img0 = self._to_tensor(frames[i])
             img1 = self._to_tensor(frames[i + 1])
             output.append(frames[i])
 
             if scale == 2:
-                mid = self._infer_mid(img0, img1, spatial_scale, timestep=0.5)
+                mid = self._infer(img0, img1, timestep=0.5, pyr_lvl=pyr_lvl)
                 output.append(self._to_numpy(mid))
             elif scale == 4:
-                # Recursive 2-level: t=0.25, 0.5, 0.75
-                mid_half = self._infer_mid(img0, img1, spatial_scale, timestep=0.5)
-                mid_q1   = self._infer_mid(img0, mid_half, spatial_scale, timestep=0.5)
-                mid_q3   = self._infer_mid(mid_half, img1, spatial_scale, timestep=0.5)
+                # Recursive: t=0.25, 0.5, 0.75
+                mid_half = self._infer(img0, img1, timestep=0.5, pyr_lvl=pyr_lvl)
+                mid_q1 = self._infer(img0, mid_half, timestep=0.5, pyr_lvl=pyr_lvl)
+                mid_q3 = self._infer(mid_half, img1, timestep=0.5, pyr_lvl=pyr_lvl)
                 output.append(self._to_numpy(mid_q1))
                 output.append(self._to_numpy(mid_half))
                 output.append(self._to_numpy(mid_q3))
@@ -119,20 +125,20 @@ class FrameInterpolator:
         output.append(frames[-1])
         return output
 
-    def _infer_mid(
+    def _infer(
         self,
         img0: torch.Tensor,
         img1: torch.Tensor,
-        scale: float,
-        timestep: float = 0.5,
+        timestep: float,
+        pyr_lvl: int,
     ) -> torch.Tensor:
-        """Run RIFE inference for a single intermediate frame."""
-        with torch.autocast(device_type="cuda", enabled=self.fp16):
-            mid, _ = self.model.inference(img0, img1, scale=scale, timestep=timestep)
-        return mid
+        """Run BiM-VFI inference for a single intermediate frame."""
+        t = torch.tensor([timestep], dtype=torch.float32, device=self.device)
+        pred = self.model(img0, img1, t, pyr_lvl=pyr_lvl)
+        return pred
 
     def _to_tensor(self, frame: np.ndarray) -> torch.Tensor:
-        """Convert BGR uint8 numpy frame to normalized float32 CUDA tensor."""
+        """Convert BGR uint8 numpy frame to normalized float32 tensor."""
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         t = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
         return t.unsqueeze(0).to(self.device)

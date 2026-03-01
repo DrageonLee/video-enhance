@@ -28,7 +28,9 @@ def run_pipeline(
     background: str = "white",
     sam2_checkpoint: str = "checkpoints/sam2_hiera_large.pt",
     sam2_cfg: str = "sam2_hiera_l.yaml",
-    rife_model_path: str = "Practical-RIFE/train_log",
+    rife_model_path: str = None,
+    bimvfi_root: str = "BiM-VFI",
+    bimvfi_ckpt: str = "checkpoints/bimvfi.pth",
     gt_path: str = None,
 ) -> str:
     """
@@ -69,7 +71,10 @@ def run_pipeline(
     # ── Stage 2: Frame Interpolation ─────────────────────────────────────────
     if interpolation:
         print("\n[Pipeline] Stage 2: Frame Interpolation (RIFE)")
-        interpolator = FrameInterpolator(model_path=rife_model_path)
+        interpolator = FrameInterpolator(
+            bimvfi_root=bimvfi_root,
+            ckpt_path=bimvfi_ckpt,
+        )
         stage2_out = output_path if not gt_path else str(Path("tmp") / "stage2_interpolated.mp4")
         interpolator.process_video(current_path, stage2_out, scale=scale)
         current_path = stage2_out
@@ -105,7 +110,8 @@ if __name__ == "__main__":
     parser.add_argument("--gt",          default=None,          help="Ground truth video for evaluation")
     parser.add_argument("--sam2_ckpt",   default="checkpoints/sam2_hiera_large.pt")
     parser.add_argument("--sam2_cfg",    default="sam2_hiera_l.yaml")
-    parser.add_argument("--rife_model",  default="Practical-RIFE/train_log")
+    parser.add_argument("--bimvfi_root",  default="BiM-VFI",                  help="BiM-VFI repo root")
+    parser.add_argument("--bimvfi_ckpt",  default="checkpoints/bimvfi.pth",   help="BiM-VFI checkpoint path")
     args = parser.parse_args()
 
     if not args.bg_removal and not args.interpolation:

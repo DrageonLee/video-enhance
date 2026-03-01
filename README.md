@@ -20,9 +20,8 @@ Modern teleconferencing applications like **Microsoft Teams** and **Zoom** face 
 | Stage | Model | Task |
 |---|---|---|
 | **Stage 1** | [SAM2](https://arxiv.org/abs/2408.00714) (Meta AI, 2024) | Background removal / replacement |
-| **Stage 2** | [RIFE v4.25](https://arxiv.org/abs/2011.06294) (ECCV 2022) | Frame interpolation (30fps → 60fps) |
+| **Stage 2** | [BiM-VFI](https://github.com/KAIST-VICLab/BiM-VFI) (KAIST VICLab, CVPR 2025) | Frame interpolation (30fps → 60fps) |
 
-> This project targets the skill set described in **Microsoft Applied Sciences Group** research positions, specifically: *"frame interpolation, video super-resolution … AR features for tele-conferencing … understand user's gestures and environments."*
 
 ---
 
@@ -40,9 +39,10 @@ Input Video (30fps, raw background)
           │ Masked video (person only)
           ▼
 ┌─────────────────────┐
-│   RIFE v4.25        │  ← Real-time Intermediate Flow Estimation
-│   IFNet + Synthesis │     Generates intermediate frames via optical flow
-│   (frame_interp.py) │
+│   BiM-VFI           │  ← BiM-VFI (KAIST VICLab, CVPR 2025)
+│   Bidirectional     │     Bidirectional Motion Field estimation
+│   Motion Field      │     → Handles non-uniform speaker motions
+│   (bi_interpolation.py) │
 └─────────┬───────────┘
           │
           ▼
@@ -77,8 +77,8 @@ Enhanced Output (60fps, clean background)
 git clone https://github.com/DrageonLee/video-enhance
 cd teleconf-enhance
 
-# Install RIFE
-git clone https://github.com/hzwer/Practical-RIFE
+# Install BiM-VFI
+git clone https://github.com/KAIST-VICLab/BiM-VFI
 
 # Install SAM2
 pip install git+https://github.com/facebookresearch/segment-anything-2.git
@@ -94,9 +94,9 @@ pip install -r requirements.txt
 mkdir -p checkpoints
 wget -P checkpoints https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt
 
-# RIFE v4.25 weights — download from:
-# https://github.com/hzwer/Practical-RIFE (see Model List)
-# Place in: Practical-RIFE/train_log/
+# BiM-VFI pretrained model — download from:
+# https://drive.google.com/file/d/18Wre7XyRtu_wtFRzcsit6oNfHiFRt9vC/view
+# Place as: checkpoints/bimvfi.pth
 ```
 
 ### 3. Run Pipeline
@@ -107,7 +107,9 @@ python pipeline.py \
   --input  assets/sample.mp4 \
   --output assets/output.mp4 \
   --bg_removal --interpolation \
-  --background white --scale 2
+  --background white --scale 2 \
+  --bimvfi_root BiM-VFI \
+  --bimvfi_ckpt checkpoints/bimvfi.pth
 
 # Evaluate against ground truth
 python evaluate.py --pred assets/output.mp4 --gt assets/gt.mp4
@@ -127,7 +129,7 @@ python evaluate.py --pred assets/output.mp4 --gt assets/gt.mp4
 ```
 teleconf_enhance/
 ├── background_removal.py   # SAM2 video background removal
-├── frame_interpolation.py  # RIFE frame interpolation
+├── frame_interpolation.py  # BiM-VFI frame interpolation (CVPR 2025)
 ├── pipeline.py             # End-to-end pipeline
 ├── evaluate.py             # PSNR / SSIM / LPIPS metrics
 ├── app.py                  # Gradio web demo
@@ -149,11 +151,11 @@ teleconf_enhance/
   year    = {2024}
 }
 
-@inproceedings{huang2022rife,
-  title     = {Real-Time Intermediate Flow Estimation for Video Frame Interpolation},
-  author    = {Huang, Zhewei and Zhang, Tianyuan and Heng, Wen and Shi, Boxin and Zhou, Shuchang},
-  booktitle = {ECCV},
-  year      = {2022}
+@inproceedings{seo2025bimvfi,
+  title   = {BiM-VFI: Bidirectional Motion Field-Guided Frame Interpolation for Video with Non-uniform Motions},
+  author  = {Seo, Wonyong and Oh, Jihyong and Kim, Munchurl},
+  booktitle = {CVPR},
+  year    = {2025}
 }
 ```
 
@@ -161,4 +163,4 @@ teleconf_enhance/
 
 ## 📄 License
 
-MIT License. Model weights are subject to their respective licenses (SAM2: Apache 2.0, RIFE: MIT).
+MIT License. Model weights are subject to their respective licenses (SAM2: Apache 2.0, BiM-VFI: research/education use).
