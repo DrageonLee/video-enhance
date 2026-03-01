@@ -1,0 +1,26 @@
+# Core Deep Learning
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.24.0
+
+# SAM2 — Background Removal
+# Install via: pip install git+https://github.com/facebookresearch/segment-anything-2.git
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# RIFE — Frame Interpolation
+# Clone via: git clone https://github.com/hzwer/Practical-RIFE
+einops>=0.7.0
+
+# Evaluation Metrics
+lpips>=0.1.4
+scikit-image>=0.21.0
+
+# Demo
+gradio>=4.0.0
+
+# Utilities
+tqdm>=4.65.0
+matplotlib>=3.7.0
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.9
